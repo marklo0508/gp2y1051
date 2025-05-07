@@ -1,6 +1,9 @@
+/**
+ * Sharp GP2Y1051 PM2.5 感测器（4 字节 UART 协议版）
+ */
+//% weight=0 color=#59c631 icon="\uf0c2" block="PM2.5"
 namespace GP2Y1051 {
-
-    let init = false
+    let inited = false
 
     //% blockId="setSerial" block="set Sharp GP2Y1051 to %pin"
     //% weight=100 blockGap=20 blockInlineInputs=true
@@ -9,72 +12,39 @@ namespace GP2Y1051 {
         serial.redirect(
             SerialPin.USB_TX,
             pin,
-            BaudRate.BaudRate9600
+            BaudRate.BaudRate9600    // ← 改为 9600bps
         )
-        init = true
+        inited = true
     }
 
-
-    //% blockId="getData" block="the data of PM2.5(ug/m3)"
-    //% weight=90 blockGap=20 blockInlineInputs=true   
+    //% blockId="getData" block="the data of PM2.5 (μg/m³)"
+    //% weight=90 blockGap=20 blockInlineInputs=true
     export function getData(): number {
-        let myData = 0
-        if (init) {
-            let myNum = 0
-            let myArr: number[] = [0, 0, 0, 0, 0, 0]
-            let temp: Buffer
-            myNum = serial.readBuffer(1).getNumber(NumberFormat.UInt8BE, 0)
-            while (myData == 0) {
-                while (myNum != 170) {
-                    myNum = serial.readBuffer(1).getNumber(NumberFormat.UInt8BE, 0)
-                }
-                temp = serial.readBuffer(6)
-                for (let i = 0; i < 6; i++) {
-                    myArr[i] = temp.getNumber(NumberFormat.UInt8BE, i)
-                }
-                if (myArr[5] == 255 && (myArr[0] + myArr[1] + myArr[2] + myArr[3]) == myArr[4]) {
-                    myData = checkPM25(myArr)
-                }
-                else {
-                    myArr = [0, 0, 0, 0, 0, 0]
-                }
-            }
+        if (!inited) {
+            // 未初始化就返回 0
+            return 0
         }
-        return Math.round(myData)
-    }
 
+        // 1) 等待头字节 0xA5
+        let h = 0
+        do {
+            h = serial.readBuffer(1)
+                      .getNumber(NumberFormat.UInt8BE, 0)
+        } while (h !== 0xA5)
 
-    function checkPM25(tempArr: number[]): number {
-        let vo = ((tempArr[0] * 256 + tempArr[1]) * 2.5) / 1024;
-        let c = 0;
-        if (vo < 0.045)
-            c = vo * 200;
-        else if (vo < 0.048)
-            c = vo * 400;
-        else if (vo < 0.051)
-            c = vo * 600;
-        else if (vo < 0.054)
-            c = vo * 750;
-        else if (vo < 0.058)
-            c = vo * 900;
-        else if (vo < 0.064)
-            c = vo * 1000;
-        else if (vo < 0.070)
-            c = vo * 1250;
-        else if (vo < 0.075)
-            c = vo * 1400;
-        else if (vo < 0.080)
-            c = vo * 1700;
-        else if (vo < 0.085)
-            c = vo * 1800;
-        else if (vo < 0.090)
-            c = vo * 1900;
-        else if (vo < 0.1)
-            c = vo * 2000;
-        else if (vo < 0.110)
-            c = vo * 2200;
-        else if (vo > 0.110)
-            c = vo * 3000;
-        return c
+        // 2) 读 DATAH, DATAL, SUM
+        let buf = serial.readBuffer(3)
+        let dataH = buf.getNumber(NumberFormat.UInt8BE, 0) & 0x7F
+        let dataL = buf.getNumber(NumberFormat.UInt8BE, 1) & 0x7F
+        let sum   = buf.getNumber(NumberFormat.UInt8BE, 2) & 0x7F
+
+        // 3) 校验和：低 7 位
+        if ( ((0xA5 + dataH + dataL) & 0x7F) !== sum ) {
+            // 校验失败
+            return 0
+        }
+
+        // 4) 计算浓度返回
+        return dataH * 128 + dataL
     }
 }
