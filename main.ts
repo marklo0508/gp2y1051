@@ -9,7 +9,7 @@ namespace GP2Y1051 {
         serial.redirect(
             SerialPin.USB_TX,
             pin,
-            BaudRate.BaudRate2400
+            BaudRate.BaudRate9600
         )
         init = true
     }
